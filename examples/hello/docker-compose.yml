@@ -1,0 +1,54 @@
+# vango 示例应用的容器编排。
+#
+#   docker compose -f examples/hello/docker-compose.yml up --build
+#   curl http://localhost:8080/api/v1/greet/vango
+
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: examples/hello/Dockerfile
+    image: vango-hello:dev
+    ports:
+      - "8080:8080"
+    # 用 tini 作为 PID 1，确保信号与僵尸进程被正确处理。
+    init: true
+    # 应用默认 15s 优雅关闭，比 docker stop 的 10s 默认宽限期更长。
+    stop_grace_period: 20s
+    environment:
+      VANGO_HTTP_ADDR: ":8080"
+      VANGO_LOG_LEVEL: "info"
+      VANGO_LOG_FORMAT: "json"
+    healthcheck:
+      test: ["CMD", "/app", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # 需要数据库时取消注释，并在应用中读取 VANGO_DB_DSN：
+  #
+  # db:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_USER: vango
+  #     POSTGRES_PASSWORD: vango
+  #     POSTGRES_DB: vango
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U vango"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 10
+  #
+  # 然后在 api 服务上：
+  #   environment:
+  #     VANGO_DB_DSN: "postgres://vango:vango@db:5432/vango?sslmode=disable"
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+
+# volumes:
+#   pgdata:
