@@ -164,3 +164,64 @@ func TestSecureHeaders(t *testing.T) {
 		}
 	}
 }
+
+func TestRateLimitIgnoresSpoofedForwardedFor(t *testing.T) {
+	router := NewRouter()
+	router.Use(RateLimit(1, 1))
+	router.GET("/limited", func(c *Context) error { return OK(c, nil) })
+
+	send := func(forwarded string) int {
+		request := httptest.NewRequest(http.MethodGet, "/limited", nil)
+		request.RemoteAddr = "192.0.2.50:1234"
+		request.Header.Set("X-Forwarded-For", forwarded)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		return recorder.Code
+	}
+
+	if code := send("203.0.113.1"); code != http.StatusOK {
+		t.Fatalf("first request status = %d", code)
+	}
+	// 伪造新的 X-Forwarded-For 不能绕过限流。
+	if code := send("203.0.113.2"); code != http.StatusTooManyRequests {
+		t.Fatalf("second request status = %d, want 429", code)
+	}
+}
+
+func TestCORSRejectsWildcardWithCredentials(t *testing.T) {
+	router := NewRouter()
+	router.Use(CORS(CORSOptions{
+		AllowOrigins:     []string{"*"},
+		AllowCredentials: true,
+	}))
+	router.GET("/cors", func(c *Context) error { return OK(c, nil) })
+
+	request := httptest.NewRequest(http.MethodGet, "/cors", nil)
+	request.Header.Set("Origin", "https://evil.example")
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("allow origin = %q, want empty for wildcard+credentials", got)
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Fatalf("allow credentials = %q, want empty", got)
+	}
+}
+
+func TestRequestIDRejectsInvalidHeader(t *testing.T) {
+	router := NewRouter()
+	router.Use(RequestID())
+	router.GET("/id", func(c *Context) error { return OK(c, c.RequestID()) })
+
+	request := httptest.NewRequest(http.MethodGet, "/id", nil)
+	request.Header.Set(HeaderRequestID, "invalid id with spaces")
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if got := recorder.Header().Get(HeaderRequestID); got == "invalid id with spaces" || got == "" {
+		t.Fatalf("response request id = %q, want a generated id", got)
+	}
+}

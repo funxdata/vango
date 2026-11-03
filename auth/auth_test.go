@@ -7,8 +7,11 @@ import (
 	"github.com/funxdata/vango/errs"
 )
 
+// testSecret 是长度符合 MinSecretLength 要求的测试密钥。
+var testSecret = []byte("0123456789abcdef0123456789abcdef")
+
 func TestSignAndParse(t *testing.T) {
-	signer, err := NewSigner([]byte("secret"), WithIssuer("vango"))
+	signer, err := NewSigner(testSecret, WithIssuer("vango"))
 	if err != nil {
 		t.Fatalf("NewSigner returned error: %v", err)
 	}
@@ -37,7 +40,7 @@ func TestSignAndParse(t *testing.T) {
 }
 
 func TestParseRejectsTamperedToken(t *testing.T) {
-	signer, err := NewSigner([]byte("secret"))
+	signer, err := NewSigner(testSecret)
 	if err != nil {
 		t.Fatalf("NewSigner returned error: %v", err)
 	}
@@ -55,7 +58,7 @@ func TestParseRejectsTamperedToken(t *testing.T) {
 
 func TestParseRejectsExpiredToken(t *testing.T) {
 	now := time.Now()
-	signer, err := NewSigner([]byte("secret"), WithClock(func() time.Time { return now }))
+	signer, err := NewSigner(testSecret, WithClock(func() time.Time { return now }))
 	if err != nil {
 		t.Fatalf("NewSigner returned error: %v", err)
 	}
@@ -65,7 +68,7 @@ func TestParseRejectsExpiredToken(t *testing.T) {
 		t.Fatalf("Sign returned error: %v", err)
 	}
 
-	expired, err := NewSigner([]byte("secret"), WithClock(func() time.Time { return now.Add(2 * time.Minute) }))
+	expired, err := NewSigner(testSecret, WithClock(func() time.Time { return now.Add(2 * time.Minute) }))
 	if err != nil {
 		t.Fatalf("NewSigner returned error: %v", err)
 	}
@@ -75,9 +78,65 @@ func TestParseRejectsExpiredToken(t *testing.T) {
 	}
 }
 
-func TestNewSignerRequiresSecret(t *testing.T) {
+func TestNewSignerRequiresStrongSecret(t *testing.T) {
 	if _, err := NewSigner(nil); err == nil {
 		t.Fatal("expected error for empty secret")
+	}
+	if _, err := NewSigner([]byte("short-secret")); err == nil {
+		t.Fatalf("expected error for secret shorter than %d bytes", MinSecretLength)
+	}
+}
+
+func TestParseRejectsWrongIssuerAndAudience(t *testing.T) {
+	signer, err := NewSigner(testSecret, WithIssuer("vango"), WithAudience("api"))
+	if err != nil {
+		t.Fatalf("NewSigner returned error: %v", err)
+	}
+	token, err := signer.Sign(Claims{Subject: "42"}, time.Hour)
+	if err != nil {
+		t.Fatalf("Sign returned error: %v", err)
+	}
+
+	otherIssuer, err := NewSigner(testSecret, WithIssuer("other"), WithAudience("api"))
+	if err != nil {
+		t.Fatalf("NewSigner returned error: %v", err)
+	}
+	if _, err := otherIssuer.Parse(token); err == nil {
+		t.Fatal("token with a different issuer should be rejected")
+	}
+
+	otherAudience, err := NewSigner(testSecret, WithIssuer("vango"), WithAudience("other"))
+	if err != nil {
+		t.Fatalf("NewSigner returned error: %v", err)
+	}
+	if _, err := otherAudience.Parse(token); err == nil {
+		t.Fatal("token with a different audience should be rejected")
+	}
+}
+
+func TestParseChecksExpiryOnRawPayload(t *testing.T) {
+	now := time.Now()
+	signer, err := NewSigner(testSecret, WithClock(func() time.Time { return now }))
+	if err != nil {
+		t.Fatalf("NewSigner returned error: %v", err)
+	}
+
+	// 自定义声明结构体没有 exp 字段，校验仍必须基于原始 payload。
+	type customClaims struct {
+		Subject string `json:"sub"`
+	}
+	token, err := signer.Sign(customClaims{Subject: "42"}, time.Minute)
+	if err != nil {
+		t.Fatalf("Sign returned error: %v", err)
+	}
+
+	expired, err := NewSigner(testSecret, WithClock(func() time.Time { return now.Add(2 * time.Minute) }))
+	if err != nil {
+		t.Fatalf("NewSigner returned error: %v", err)
+	}
+	var target customClaims
+	if err := expired.ParseClaims(token, &target); !isUnauthorized(err) {
+		t.Fatalf("expected expired error, got %v", err)
 	}
 }
 

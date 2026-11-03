@@ -62,6 +62,7 @@ type App struct {
 	serverOptions     []web.ServerOption
 	middlewares       []web.Middleware
 	logSkipPaths      []string
+	maxBodyBytes      int64
 	defaultMiddleware bool
 	healthEndpoints   bool
 
@@ -85,6 +86,7 @@ func New(opts ...Option) *App {
 		addr:              ":8080",
 		shutdownTimeout:   15 * time.Second,
 		router:            web.NewRouter(),
+		maxBodyBytes:      4 << 20,
 		defaultMiddleware: true,
 		healthEndpoints:   true,
 		errCh:             make(chan error, 1),
@@ -119,12 +121,16 @@ func New(opts ...Option) *App {
 	if app.defaultMiddleware {
 		app.middlewares = append([]web.Middleware{
 			web.Recover(app.logger),
+			web.SecureHeaders(),
 			web.RequestID(),
 			web.LoggerWithOptions(web.LoggerOptions{
 				Logger:    app.logger,
 				SkipPaths: app.logSkipPaths,
 			}),
 		}, app.middlewares...)
+	}
+	if app.maxBodyBytes > 0 {
+		app.middlewares = append([]web.Middleware{web.BodyLimit(app.maxBodyBytes)}, app.middlewares...)
 	}
 	app.router.Use(app.middlewares...)
 	if app.healthEndpoints {

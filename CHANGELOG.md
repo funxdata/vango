@@ -42,6 +42,21 @@
 - 版本信息改为构建期通过 `-ldflags -X` 注入。
 - 配置统一由 `config.Load` / `config.MustLoad` 返回实例，不使用全局配置。
 
+### Security
+
+- `auth`：JWT 密钥至少 32 字节；解析时基于原始 payload 校验 `exp`/`nbf`，
+  修复自定义声明结构体缺少 `exp` 时校验被静默跳过的问题；新增 `WithAudience` 并校验 `iss`/`aud`。
+- `auth`：密码校验拒绝迭代次数超过上限的哈希串，避免被篡改的哈希造成 CPU 耗尽。
+- `web`：`RateLimit` 默认只使用直连地址作为键，伪造 `X-Forwarded-For` 不再能绕过限流；
+  需要反向代理场景时显式启用 `RealIP`。
+- `web`：`BodyLimit`（4 MiB，`vango.WithMaxBodyBytes` 可调）与 `SecureHeaders` 纳入 `App` 默认中间件。
+- `web`：`BindJSON` / `BindQuery` 的错误响应不再包含底层解析错误与字段类型。
+- `web`：`RequestID` 校验请求头格式与长度，避免不可信内容进入日志与响应头。
+- `web`：`CORS` 不再把 `AllowOrigins: ["*"]` 与 `AllowCredentials: true` 组合成回显任意来源。
+- `web`：`Server` 增加默认 `IdleTimeout`（120s），减少空闲连接占用。
+- `httpx`：默认限制响应体读取为 16 MiB，错误信息省略 URL 的 query。
+- `debug`：trace 文件使用 `O_NOFOLLOW` 打开，避免符号链接攻击。
+
 ### Fixed
 
 - `config`：按点号路径读取嵌套配置一直返回默认值（`lookup` 未逐层遍历）。

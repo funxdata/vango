@@ -232,7 +232,7 @@ return errs.Internal("db unavailable").WithCause(err)   // 500，原因只进日
 ### 鉴权
 
 ```go
-signer, _ := auth.NewSigner([]byte(secret), auth.WithIssuer("vango"))
+signer, _ := auth.NewSigner([]byte(secret), auth.WithIssuer("vango")) // secret 至少 32 字节
 token, _ := signer.Sign(auth.Claims{Subject: "42", Roles: []string{"admin"}}, time.Hour)
 
 api := app.Group("/api", auth.Middleware(signer, auth.WithSkipPaths("/api/login")))

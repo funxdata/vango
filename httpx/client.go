@@ -21,13 +21,22 @@ import (
 	"time"
 )
 
+// defaultMaxResponseBytes 是响应体读取的默认上限。
+const defaultMaxResponseBytes = 16 << 20
+
 // Client 是 vango 的 HTTP 客户端。
 type Client struct {
 	*http.Client
+	maxResponseBytes int64
 }
 
 // Option 定制 Client。
 type Option func(*Client)
+
+// WithMaxResponseBytes 设置响应体读取上限，默认 16 MiB；传 0 表示不限制。
+func WithMaxResponseBytes(n int64) Option {
+	return func(c *Client) { c.maxResponseBytes = n }
+}
 
 // WithTimeout 设置整体超时，默认 30s。
 func WithTimeout(timeout time.Duration) Option {
@@ -61,9 +70,12 @@ func WithInsecureSkipVerify() Option {
 	}
 }
 
-// New 创建一个客户端，默认超时 30s。
+// New 创建一个客户端，默认超时 30s、响应体上限 16 MiB。
 func New(opts ...Option) *Client {
-	c := &Client{Client: &http.Client{Timeout: 30 * time.Second}}
+	c := &Client{
+		Client:           &http.Client{Timeout: 30 * time.Second},
+		maxResponseBytes: defaultMaxResponseBytes,
+	}
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -103,9 +115,14 @@ func (c *Client) DoJSON(req *http.Request, dst any) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		return fmt.Errorf("httpx: %s %s returned %d", req.Method, req.URL.String(), resp.StatusCode)
+		return fmt.Errorf("httpx: %s %s returned %d", req.Method, requestTarget(req.URL), resp.StatusCode)
 	}
-	return json.NewDecoder(resp.Body).Decode(dst)
+
+	body, err := c.readBody(resp.Body)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(body, dst)
 }
 
 // PostForm 以 application/x-www-form-urlencoded 提交表单并返回响应体。
@@ -174,9 +191,32 @@ func (c *Client) doBytes(method, uri, contentType string, body io.Reader) ([]byt
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		return nil, fmt.Errorf("httpx: %s %s returned %d", method, uri, resp.StatusCode)
+		return nil, fmt.Errorf("httpx: %s %s returned %d", method, requestTarget(req.URL), resp.StatusCode)
 	}
-	return io.ReadAll(resp.Body)
+	return c.readBody(resp.Body)
+}
+
+// readBody 读取响应体并执行大小限制。
+func (c *Client) readBody(body io.Reader) ([]byte, error) {
+	if c.maxResponseBytes <= 0 {
+		return io.ReadAll(body)
+	}
+	data, err := io.ReadAll(io.LimitReader(body, c.maxResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > c.maxResponseBytes {
+		return nil, fmt.Errorf("httpx: response body exceeds %d bytes", c.maxResponseBytes)
+	}
+	return data, nil
+}
+
+// requestTarget 返回用于日志与错误的地址，省略 query，避免泄露凭据。
+func requestTarget(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + u.Path
 }
 
 // defaultClient 是包级函数的默认客户端。

@@ -21,6 +21,22 @@ func WithRequestID(r *http.Request, id string) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), requestIDKey, id))
 }
 
+// maxRequestIDLength 是请求 ID 的最大长度。
+const maxRequestIDLength = 128
+
+// validRequestID 只接受可见 ASCII，避免把不可信内容带进日志与响应头。
+func validRequestID(id string) bool {
+	if id == "" || len(id) > maxRequestIDLength {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		if id[i] < 0x21 || id[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
 // RequestID 确保每个请求都有 ID：优先复用请求头中的值，否则生成一个。
 // 生成结果会写入响应头，并可通过 Context.RequestID 读取。
 func RequestID(generators ...func() string) Middleware {
@@ -32,7 +48,7 @@ func RequestID(generators ...func() string) Middleware {
 	return func(next HandlerFunc) HandlerFunc {
 		return func(c *Context) error {
 			id := c.r.Header.Get(HeaderRequestID)
-			if id == "" {
+			if !validRequestID(id) {
 				id = generate()
 			}
 			c.r = WithRequestID(c.r, id)
@@ -206,9 +222,11 @@ func CORS(options ...CORSOptions) Middleware {
 			switch {
 			case allowAll && !opts.AllowCredentials:
 				c.SetHeader("Access-Control-Allow-Origin", "*")
-			case allowAll || contains(opts.AllowOrigins, origin):
+			case !allowAll && contains(opts.AllowOrigins, origin):
 				c.SetHeader("Access-Control-Allow-Origin", origin)
 			default:
+				// 包括 AllowOrigins=["*"] + AllowCredentials=true 这一无效组合：
+				// 通配来源不能与凭证一起使用，因此不回显 Origin。
 				return next(c)
 			}
 
@@ -287,7 +305,7 @@ func RateLimit(rps float64, burst int) Middleware {
 
 	return func(next HandlerFunc) HandlerFunc {
 		return func(c *Context) error {
-			key := c.IP()
+			key := c.trustedIP()
 			now := time.Now()
 
 			mu.Lock()

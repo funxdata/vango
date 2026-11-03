@@ -46,7 +46,7 @@ func init() {
 }
 
 func writeTrace(start time.Time) {
-	file, err := os.OpenFile(TraceFile(), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+	file, err := os.OpenFile(TraceFile(), os.O_RDWR|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return
 	}

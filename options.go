@@ -67,6 +67,11 @@ func WithLogSkipPaths(paths ...string) Option {
 	return func(a *App) { a.logSkipPaths = append(a.logSkipPaths, paths...) }
 }
 
+// WithMaxBodyBytes 设置请求体大小上限，默认 4 MiB；传 0 表示不限制。
+func WithMaxBodyBytes(n int64) Option {
+	return func(a *App) { a.maxBodyBytes = n }
+}
+
 // WithoutDefaultMiddleware 关闭内置的 Recover/RequestID/Logger 中间件。
 func WithoutDefaultMiddleware() Option {
 	return func(a *App) { a.defaultMiddleware = false }

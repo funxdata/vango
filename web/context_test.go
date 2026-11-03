@@ -124,3 +124,25 @@ func TestRecoverMiddleware(t *testing.T) {
 		t.Fatalf("status = %d, want 500", recorder.Code)
 	}
 }
+
+func TestBindJSONDoesNotLeakParserDetails(t *testing.T) {
+	router := NewRouter()
+	router.POST("/users", func(c *Context) error {
+		var payload createUser
+		return c.BindJSON(&payload)
+	})
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(`{"name":`)))
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", recorder.Code)
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, "invalid JSON body") {
+		t.Fatalf("body = %q", body)
+	}
+	if strings.Contains(body, "unexpected EOF") || strings.Contains(body, "unexpected end") {
+		t.Fatalf("body leaks parser details: %q", body)
+	}
+}

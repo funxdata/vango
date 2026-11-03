@@ -75,3 +75,9 @@ func Fail(c *Context, err error) error {
 func badRequest(message string) error {
 	return errs.BadRequest(message)
 }
+
+// badRequestCause 与 badRequest 相同，但保留底层原因供日志排查，
+// 原因不会出现在响应体中。
+func badRequestCause(message string, cause error) error {
+	return errs.BadRequest(message).WithCause(cause)
+}

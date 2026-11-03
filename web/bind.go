@@ -77,7 +77,7 @@ func assignValue(field reflect.Value, raw []string, name string) error {
 	if field.CanAddr() {
 		if unmarshaler, ok := field.Addr().Interface().(encoding.TextUnmarshaler); ok {
 			if err := unmarshaler.UnmarshalText([]byte(raw[0])); err != nil {
-				return badRequest(fmt.Sprintf("field %s: %v", name, err))
+				return badRequestCause(fmt.Sprintf("field %s has an invalid value", name), err)
 			}
 			return nil
 		}
@@ -90,28 +90,28 @@ func assignValue(field reflect.Value, raw []string, name string) error {
 	case reflect.Bool:
 		value, err := strconv.ParseBool(raw[0])
 		if err != nil {
-			return badRequest(fmt.Sprintf("field %s: %v", name, err))
+			return badRequestCause(fmt.Sprintf("field %s has an invalid value", name), err)
 		}
 		field.SetBool(value)
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		value, err := strconv.ParseInt(raw[0], 10, 64)
 		if err != nil {
-			return badRequest(fmt.Sprintf("field %s: %v", name, err))
+			return badRequestCause(fmt.Sprintf("field %s has an invalid value", name), err)
 		}
 		field.SetInt(value)
 
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		value, err := strconv.ParseUint(raw[0], 10, 64)
 		if err != nil {
-			return badRequest(fmt.Sprintf("field %s: %v", name, err))
+			return badRequestCause(fmt.Sprintf("field %s has an invalid value", name), err)
 		}
 		field.SetUint(value)
 
 	case reflect.Float32, reflect.Float64:
 		value, err := strconv.ParseFloat(raw[0], 64)
 		if err != nil {
-			return badRequest(fmt.Sprintf("field %s: %v", name, err))
+			return badRequestCause(fmt.Sprintf("field %s has an invalid value", name), err)
 		}
 		field.SetFloat(value)
 
@@ -137,7 +137,7 @@ func assignValue(field reflect.Value, raw []string, name string) error {
 		field.Set(slice)
 
 	default:
-		return badRequest(fmt.Sprintf("field %s: unsupported type %s", name, field.Type()))
+		return badRequest(fmt.Sprintf("field %s has an unsupported type", name))
 	}
 
 	return nil

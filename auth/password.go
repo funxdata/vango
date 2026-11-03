@@ -17,6 +17,8 @@ const (
 	passwordIterations = 210000
 	passwordKeyLength  = 32
 	passwordSaltLength = 16
+	// maxPasswordIterations 限制可接受的迭代次数，防止被篡改的哈希串造成 CPU 耗尽。
+	maxPasswordIterations = 1_000_000
 )
 
 // HashPassword 使用 PBKDF2-SHA256 计算密码哈希。
@@ -46,7 +48,7 @@ func VerifyPassword(encoded, password string) bool {
 	}
 
 	iterations, err := strconv.Atoi(parts[1])
-	if err != nil || iterations <= 0 {
+	if err != nil || iterations <= 0 || iterations > maxPasswordIterations {
 		return false
 	}
 

@@ -59,13 +59,15 @@ func WithListener(listener net.Listener) ServerOption {
 
 // NewServer 创建 HTTP 服务。
 //
-// 默认只设置 ReadHeaderTimeout 以防慢速攻击，读写超时按需通过 WithTimeouts 开启。
+// 默认设置 ReadHeaderTimeout 与 IdleTimeout 以防慢速攻击与空闲连接堆积；
+// 读写超时按需通过 WithTimeouts 开启（长时间流式响应需要保持为 0）。
 func NewServer(addr string, handler http.Handler, opts ...ServerOption) *Server {
 	s := &Server{
 		srv: &http.Server{
 			Addr:              addr,
 			Handler:           handler,
 			ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout:       120 * time.Second,
 		},
 	}
 

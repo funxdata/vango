@@ -201,7 +201,7 @@ func (c *Context) BindJSON(v any) error {
 		if errors.Is(err, io.EOF) {
 			return errs.BadRequest("request body is empty")
 		}
-		return errs.BadRequest("invalid JSON body: " + err.Error())
+		return errs.BadRequest("invalid JSON body").WithCause(err)
 	}
 	return nil
 }

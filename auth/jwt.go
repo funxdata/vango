@@ -62,12 +62,16 @@ type Claims struct {
 	Roles     []string `json:"roles,omitempty"`
 }
 
+// MinSecretLength 是 HMAC 密钥的最小长度（256 bit）。
+const MinSecretLength = 32
+
 // Signer 负责签发与校验 JWT。
 type Signer struct {
-	secret []byte
-	alg    Algorithm
-	issuer string
-	now    func() time.Time
+	secret   []byte
+	alg      Algorithm
+	issuer   string
+	audience string
+	now      func() time.Time
 }
 
 // SignerOption 定制 Signer。
@@ -94,6 +98,14 @@ func WithIssuer(issuer string) SignerOption {
 	}
 }
 
+// WithAudience 指定签发的 aud 声明；配置后 Parse 会拒绝 aud 不匹配的令牌。
+func WithAudience(audience string) SignerOption {
+	return func(s *Signer) error {
+		s.audience = audience
+		return nil
+	}
+}
+
 // WithClock 注入自定义时钟，便于测试。
 func WithClock(now func() time.Time) SignerOption {
 	return func(s *Signer) error {
@@ -106,9 +118,11 @@ func WithClock(now func() time.Time) SignerOption {
 }
 
 // NewSigner 创建一个 JWT 签发器。
+//
+// secret 至少 MinSecretLength 字节；HS256 的安全强度不应低于 256 bit。
 func NewSigner(secret []byte, opts ...SignerOption) (*Signer, error) {
-	if len(secret) == 0 {
-		return nil, fmt.Errorf("auth: secret must not be empty")
+	if len(secret) < MinSecretLength {
+		return nil, fmt.Errorf("auth: secret must be at least %d bytes", MinSecretLength)
 	}
 
 	s := &Signer{secret: secret, alg: HS256, now: time.Now}
@@ -120,7 +134,8 @@ func NewSigner(secret []byte, opts ...SignerOption) (*Signer, error) {
 	return s, nil
 }
 
-// Sign 签发令牌。ttl 为 0 时不写入 exp；claims 中已有的 iat/exp/iss 不会被覆盖。
+// Sign 签发令牌。ttl 为 0 时不写入 exp（令牌不过期，仅建议用于测试）；
+// claims 中已有的 iat/exp/iss/aud 不会被覆盖。
 //
 // claims 可以是 auth.Claims，也可以是自定义结构体或 map[string]any。
 func (s *Signer) Sign(claims any, ttl time.Duration) (string, error) {
@@ -141,6 +156,11 @@ func (s *Signer) Sign(claims any, ttl time.Duration) (string, error) {
 	if s.issuer != "" {
 		if _, ok := payload["iss"]; !ok {
 			payload["iss"] = s.issuer
+		}
+	}
+	if s.audience != "" {
+		if _, ok := payload["aud"]; !ok {
+			payload["aud"] = s.audience
 		}
 	}
 
@@ -201,27 +221,63 @@ func (s *Signer) ParseClaims(token string, dst any) error {
 	if err != nil {
 		return ErrInvalidToken
 	}
+
+	// 时间与签发方校验必须基于原始 payload，
+	// 否则自定义声明结构体漏掉 exp 字段时校验会被静默跳过。
+	var payload map[string]any
+	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
+		return ErrInvalidToken
+	}
+	if err := s.validateClaims(payload); err != nil {
+		return err
+	}
+
 	if err := json.Unmarshal(payloadJSON, dst); err != nil {
 		return ErrInvalidToken
 	}
-
-	payload, err := toMap(dst)
-	if err != nil {
-		return ErrInvalidToken
-	}
-	return s.validateTimes(payload)
+	return nil
 }
 
-func (s *Signer) validateTimes(payload map[string]any) error {
+func (s *Signer) validateClaims(payload map[string]any) error {
 	now := s.now().Unix()
 
-	if exp, ok := toInt64(payload["exp"]); ok && exp > 0 && now > exp {
+	if exp, ok := toInt64(payload["exp"]); ok && exp > 0 && now >= exp {
 		return ErrTokenExpired
 	}
 	if nbf, ok := toInt64(payload["nbf"]); ok && nbf > 0 && now < nbf {
 		return ErrTokenNotYetValid
 	}
+
+	if s.issuer != "" {
+		if iss, _ := payload["iss"].(string); iss != s.issuer {
+			return ErrInvalidToken
+		}
+	}
+	if s.audience != "" && !audienceMatches(payload["aud"], s.audience) {
+		return ErrInvalidToken
+	}
 	return nil
+}
+
+// audienceMatches 判断 aud 声明（字符串或字符串数组）是否包含 want。
+func audienceMatches(value any, want string) bool {
+	switch aud := value.(type) {
+	case string:
+		return aud == want
+	case []any:
+		for _, item := range aud {
+			if s, ok := item.(string); ok && s == want {
+				return true
+			}
+		}
+	case []string:
+		for _, s := range aud {
+			if s == want {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *Signer) sign(input []byte) []byte {
@@ -243,7 +299,12 @@ func (s *Signer) hash() hash.Hash {
 
 func toMap(v any) (map[string]any, error) {
 	if m, ok := v.(map[string]any); ok {
-		return m, nil
+		// 复制一份，避免 Sign 写入 iat/exp/iss/aud 时修改调用方的 map。
+		out := make(map[string]any, len(m)+4)
+		for key, value := range m {
+			out[key] = value
+		}
+		return out, nil
 	}
 
 	raw, err := json.Marshal(v)

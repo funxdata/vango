@@ -76,6 +76,17 @@ func RealIP(trustedProxies ...*net.IPNet) Middleware {
 	}
 }
 
+// trustedIP 返回用于限流的客户端地址。
+//
+// 启用了 RealIP 时使用其解析结果；否则只使用直连地址，
+// 不采信可被客户端伪造的 X-Forwarded-For / X-Real-IP。
+func (c *Context) trustedIP() string {
+	if ip, ok := c.store[clientIPKey].(string); ok && ip != "" {
+		return ip
+	}
+	return resolveClientIP(c.r, nil)
+}
+
 // resolveClientIP 计算真实客户端 IP。
 func resolveClientIP(r *http.Request, trustedProxies []*net.IPNet) string {
 	remote := remoteIP(r.RemoteAddr)
